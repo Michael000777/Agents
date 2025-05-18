@@ -8,7 +8,7 @@
 
 Bulk RNA-seq experiments often produce large, complex datasets that require careful QC interpretation. RiboSherlock helps by:
 
-- Parsing outputs from tools like **FastQC**, **MultiQC**, or **featureCounts**
+- Parsing outputs from reports like **count tables** and **metadata files** 
 - Identifying quality issues (e.g., low read quality, adapter contamination, GC bias)
 - Offering plain-language interpretations of QC results
 - Recommending data cleaning steps when needed
