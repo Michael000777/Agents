@@ -1,6 +1,6 @@
 from typing import Annotated, Sequence, List, Literal 
 from pydantic import BaseModel, Field 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_community.tools.tavily_search import TavilySearchResults 
 from langgraph.types import Command 
 from langgraph.graph import StateGraph, START, END, MessagesState
@@ -75,3 +75,85 @@ def supervisor_node(state: MessagesState) -> Command[Literal["enhancer", "resear
         },
         goto=goto,  
     )
+
+def enhancer_node(state: MessagesState) -> Command[Literal["supervisor"]]:
+
+    """
+        Enhancer agent node that improves and clarifies user queries.
+        Takes the original user input and transforms it into a more precise,
+        actionable request before passing it to the supervisor.
+    """
+   
+    system_prompt = (
+        "You are a Query Refinement Specialist with expertise in transforming vague requests into precise instructions. Your responsibilities include:\n\n"
+        "1. Analyzing the original query to identify key intent and requirements\n"
+        "2. Resolving any ambiguities without requesting additional user input\n"
+        "3. Expanding underdeveloped aspects of the query with reasonable assumptions\n"
+        "4. Restructuring the query for clarity and actionability\n"
+        "5. Ensuring all technical terminology is properly defined in context\n\n"
+        "Important: Never ask questions back to the user. Instead, make informed assumptions and create the most comprehensive version of their request possible."
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},  
+    ] + state["messages"]  
+
+    enhanced_query = llm.invoke(messages)
+
+    print(f"--- Workflow Transition: Prompt Enhancer → Supervisor ---")
+
+    return Command(
+        update={
+            "messages": [  
+                HumanMessage(
+                    content=enhanced_query.content, 
+                    name="enhancer"  
+                )
+            ]
+        },
+        goto="supervisor", #always go back to supervisor
+    )
+
+class GradeRequest(BaseModel):
+    score: str = Field(
+        description="Is the request about the topic? If yes -> 'Yes' if not -> 'No'"
+    )
+
+
+
+def request_grader(state: MessagesState) -> Command[Literal["supervisor"]]:
+    print("Entering Request Grader")
+
+    system_prompt = (
+        " You are a classifier that determines whether a user's question is about RNA seq analysis and Quality control."
+        "'If the question IS about that, respond with 'Yes'. Otherwise, respond with 'No'."
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},  
+    ] + state["messages"]  
+
+    grader_response = llm.with_structured_output(GradeRequest).invoke(messages)
+
+    score = grader_response.score
+
+    print(f"--- Workflow Transition: Request Grader → Supervisor ---")
+
+    return Command(
+        update={
+            "messages": [  
+                HumanMessage(
+                    content=score.content, 
+                    name="grader"  
+                )
+            ]
+        },
+        goto="supervisor", #always go back to supervisor
+    )
+
+
+
+    
+
+
+
+
