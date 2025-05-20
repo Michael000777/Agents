@@ -8,7 +8,7 @@
 
 Bulk RNA-seq experiments often produce large, complex datasets that require careful QC interpretation. RiboSherlock helps by:
 
-- Parsing outputs from reports like **count tables** and **metadata files** 
+- Parsing outputs from reports like **count tables** and **QC report files** 
 - Identifying quality issues (e.g., low read quality, adapter contamination, GC bias)
 - Offering plain-language interpretations of QC results
 - Recommending data cleaning steps when needed
@@ -32,19 +32,17 @@ RiboSherlock is built using:
 
 - **LangGraph** – Workflow engine for multi-step LLM agents
 - **LangChain / LCEL** – LLM interaction layer
-- **OpenAI / Groq / HuggingFace** – LLM providers
-- **BeautifulSoup / Pandas** – For parsing and summarizing QC files
-- **(Optional)** ChromaDB or FAISS – For document/embedding search across samples
+- **OpenAI / Groq / HuggingFace** – compatiible with LLM provider of choice.
 
 ### 📌 Core Workflow Nodes
 
 | Node               | Description                                          |
 |--------------------|------------------------------------------------------|
-| `load_inputs`       | Reads and parses FastQC/MultiQC summaries           |
-| `detect_issues`     | Classifies common QC issues                         |
-| `generate_summary`  | Produces plain-language reports                     |
-| `ask_for_feedback`  | Queries the user when results are inconclusive      |
-| `report_writer`     | Writes summaries to disk or displays them in terminal |
+| `Supervisor`       | Controls the workflow and ensures quality deliveries |
+| `grader`           | Ensures request stay on topic                        |
+| `enhancer`         | Rewrites user prompt to be compatible and complete   |
+| `coder`            | State-of-the-art coder for analytical tasks          |
+| `Validator`        | Validates results from other nodes to ensure quality |
 
 ---
 
@@ -62,3 +60,6 @@ RiboSherlock is built using:
 git clone https://github.com/yourname/ribosherlock.git
 cd ribosherlock
 pip install -r requirements.txt
+
+### Usage
+python scripts/main.py
