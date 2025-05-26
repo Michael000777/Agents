@@ -5,21 +5,30 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 from langgraph.types import Command 
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.prebuilt import create_react_agent 
+from langgraph.checkpoint.memory import MemorySaver
 from IPython.display import Image, display 
 from dotenv import load_dotenv
 from langchain_experimental.tools import PythonREPLTool
+from uuid import uuid5, NAMESPACE_DNS
 import pprint
+import asyncio
 
-load_dotenv(dotenv_path="/Users/michael/Documents/Bioinformatics/Personal_Projects/ML/Trenchware/LLM/input/.env")
+load_dotenv()
 
 from langchain_openai import ChatOpenAI
 
 llm = ChatOpenAI(model="gpt-4o")
 
+memory = MemorySaver()
+#memory = SqliteSaver("./ribo_sherlock_checkpoints.db") # for synchronuous  operations
+
 tavily_search = TavilySearchResults(max_results=2)
 
 python_repl_tool = PythonREPLTool()
 
+
+def generate_thread_id(username):
+    return str(uuid5(NAMESPACE_DNS, username.strip().lower()))
 
 class Supervisor(BaseModel):
     next: Literal["enhancer", "request_grader", "researcher", "coder"] = Field(
@@ -33,7 +42,7 @@ class Supervisor(BaseModel):
         description="Detailed justification for the routing decision, explaining the rationale behind selecting the particular specialist and how this advances the task toward completion."
     )
 
-def supervisor_node(state: MessagesState) -> Command[Literal["enhancer", "request_grader", "researcher", "coder"]]:
+async def supervisor_node(state: MessagesState) -> Command[Literal["enhancer", "request_grader", "researcher", "coder"]]:
 
     system_prompt = ('''
                  
@@ -52,14 +61,14 @@ def supervisor_node(state: MessagesState) -> Command[Literal["enhancer", "reques
         4. Continue the process until the user's request is fully and satisfactorily resolved.
 
         Your objective is to create an efficient workflow that leverages each agent's strengths while minimizing unnecessary steps, ultimately delivering complete and accurate solutions to user requests.
-                 
+                                         
     ''')
     
     messages = [
         {"role": "system", "content": system_prompt},  
     ] + state["messages"] 
 
-    response = llm.with_structured_output(Supervisor).invoke(messages)
+    response = await llm.with_structured_output(Supervisor).ainvoke(messages)
 
     goto = response.next
     reason = response.reason
@@ -75,7 +84,7 @@ def supervisor_node(state: MessagesState) -> Command[Literal["enhancer", "reques
         goto=goto,  
     )
 
-def enhancer_node(state: MessagesState) -> Command[Literal["supervisor"]]:
+async def enhancer_node(state: MessagesState) -> Command[Literal["supervisor"]]:
 
     """
         Enhancer agent node that improves and clarifies user queries.
@@ -91,13 +100,24 @@ def enhancer_node(state: MessagesState) -> Command[Literal["supervisor"]]:
         "4. Restructuring the query for clarity and actionability\n"
         "5. Ensuring all technical terminology is properly defined in context\n\n"
         "Important: Never ask questions back to the user. Instead, make informed assumptions and create the most comprehensive version of their request possible."
+        "Important Rules (Do Not Break These):"
+        " - Never answer the user's question."
+        " - Do not perform any analysis, calculations, or provide factual information."
+        " - Only rewrite or reframe the original question to make it clearer, more specific, and easier for others to act on."
+        " - If the original question is already clear, still restate it with slightly improved structure, precision, or clarity."
+
+        "**Examples**:"
+        "Original: 'Can you help with a bulk RNAseq QC problem?'"
+        "Enhanced: 'Please assist with identifying and addressing quality control issues in a bulk RNA-seq dataset.'"
+        "Original: 'What are the outliers in this file?'"
+        "Enhanced: 'Analyze the provided file to identify potential outliers in RNA-seq quality control metrics such as read counts, duplication rates, or alignment percentages.'"
     )
 
     messages = [
         {"role": "system", "content": system_prompt},  
     ] + state["messages"]  
 
-    enhanced_query = llm.invoke(messages)
+    enhanced_query = await llm.ainvoke(messages)
 
     print(f"--- Workflow Transition: Prompt Enhancer → Supervisor ---")
 
@@ -121,7 +141,7 @@ class GradeRequest(BaseModel):
 
 # Request grader for RiboSherlock
     
-def request_grader(state: MessagesState) -> Command[Literal["supervisor"]]:
+async def request_grader(state: MessagesState) -> Command[Literal["supervisor"]]:
     print("Entering Request Grader")
 
     system_prompt = (
@@ -132,7 +152,7 @@ def request_grader(state: MessagesState) -> Command[Literal["supervisor"]]:
         {"role": "system", "content": system_prompt},  
     ] + state["messages"]  
 
-    grader_response = llm.with_structured_output(GradeRequest).invoke(messages)
+    grader_response = await llm.with_structured_output(GradeRequest).ainvoke(messages)
 
     score = grader_response.score
 
@@ -163,9 +183,9 @@ def request_grader(state: MessagesState) -> Command[Literal["supervisor"]]:
 
 
 
-def qc_researcher_node(state: MessagesState) -> Command[Literal["validator"]]:
+async def qc_researcher_node(state: MessagesState) -> Command[Literal["validator"]]:
     """
-        This node specializes in gathering information using Tavilyu search tool.
+        This node specializes in gathering information using Tavily search tool.
         It takes the current task state and performs relevant research and returns findings for validations.
     """
 
@@ -181,7 +201,7 @@ def qc_researcher_node(state: MessagesState) -> Command[Literal["validator"]]:
             "Provide thorough, factual responses without speculation where information is unavailable."
     )
 
-    research_results = research_agent.invoke(state)
+    research_results = await research_agent.ainvoke(state)
 
     print(f"--- RiboSherlock Workflow Transition: Researcher → Validator ---")
 
@@ -197,7 +217,7 @@ def qc_researcher_node(state: MessagesState) -> Command[Literal["validator"]]:
         goto="validator"
     )
 
-def code_node(state: MessagesState) -> Command[Literal["validator"]]:
+async def code_node(state: MessagesState) -> Command[Literal["validator"]]:
 
     sherlock_coder_agent = create_react_agent(
         llm, 
@@ -208,7 +228,7 @@ def code_node(state: MessagesState) -> Command[Literal["validator"]]:
         )
     )
 
-    results = sherlock_coder_agent.invoke(state)
+    results = await sherlock_coder_agent.ainvoke(state)
 
     print(f"--- RiboSherlock Workflow Transition: Coder → Validator ---")
 
@@ -249,7 +269,7 @@ class Validator(BaseModel):
         description="The reason for the decision."
     )
 
-def validator_node(state: MessagesState) -> Command[Literal["supervisor", "__end__"]]:
+async def validator_node(state: MessagesState) -> Command[Literal["supervisor", "__end__"]]:
 
     user_question = state["messages"][0].content
     agent_answer = state["messages"][-1].content
@@ -260,7 +280,7 @@ def validator_node(state: MessagesState) -> Command[Literal["supervisor", "__end
         {"role": "assistant", "content": agent_answer},
     ]
 
-    response = llm.with_structured_output(Validator).invoke(messages)
+    response = await llm.with_structured_output(Validator).ainvoke(messages)
 
     goto=response.next
     reason=response.reason
@@ -291,23 +311,33 @@ graph.add_node("validator", validator_node)
 graph.add_node("enhancer", enhancer_node)
 
 graph.add_edge(START, "supervisor")
-app = graph.compile()
+app = graph.compile(checkpointer=memory)
 
+#checkpointer_id = str(uuid4())
+username = input("Welcome to RiboSherlock — please enter your username: ")
+thread_id = generate_thread_id(username)
 
-final_user_prompt = input("How can RiboSherlock Help you today? ")
-
-inputs = {
-    "messages": [
-        ("user", final_user_prompt),
-    ]
+config = {
+    "configurable": {
+        "thread_id": thread_id
+    }
 }
 
-for event in app.stream(inputs):
-    for key, value in event.items():
-        if value is None:
-            continue
-        last_message = value.get("messages", [])[-1] if "messages" in value else None
-        if last_message:
-            pprint.pprint(f"Output from node '{key}':")
-            pprint.pprint(last_message, indent=2, width=80, depth=None)
-            print()
+
+async def handle_prompt(user_prompt):
+    inputs = {"messages": [("user", user_prompt)]}
+
+    async for event in app.astream_events(inputs, config=config, version="v2"):
+        if event["event"] == "on_chat_model_stream":
+            print(event["data"]["chunk"].content, end="", flush=True)
+    print()
+
+def main():
+    while True:
+        user_prompt = input("How can RiboSherlock help you today?\n")
+        if user_prompt.lower() in ("exit", "quit"):
+            break
+        asyncio.run(handle_prompt(user_prompt))
+
+if __name__ == "__main__":
+    main()
